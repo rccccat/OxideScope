@@ -1,0 +1,7 @@
+[workspace]
+members = [
+  "common",
+  "scheduler",
+  "scanner",
+]
+resolver = "2"

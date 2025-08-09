@@ -1,0 +1,1 @@
+For libraries in a workspace we typically avoid committing Cargo.lock. For applications you may include it.
