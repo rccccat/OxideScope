@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use mongodb::{bson::{doc, Document}, options::IndexOptions, IndexModel};
 use redis::AsyncCommands;
@@ -132,9 +132,9 @@ async fn handle_task(ctx: &Ctx, con: &mut redis::aio::Connection, tmpl: Dispatch
         let _: () = con.hset(&pkey, "node", &ctx.node_name).await?;
         let _: () = con.hset(&pkey, "TargetHandler_start", &progress.TargetHandler_start).await?;
 
-        // Subdomain scan
-        progress.SubdomainScan_start = now_string();
-        let subs = subdomain_basic(&t).await;
+    // Subdomain scan
+    progress.SubdomainScan_start = now_string();
+    let subs = subdomain_scan_rsubdomain(&t).await.unwrap_or_default();
         progress.SubdomainScan_end = now_string();
         if !subs.is_empty() { save_subdomains(ctx, &tmpl.TaskName, &subs).await.ok(); }
         let _: () = con.hset(&pkey, "SubdomainScan_start", &progress.SubdomainScan_start).await?;
@@ -158,24 +158,32 @@ async fn handle_task(ctx: &Ctx, con: &mut redis::aio::Connection, tmpl: Dispatch
     Ok(())
 }
 
-async fn subdomain_basic(target: &str) -> Vec<String> {
-    // very basic: if target looks like domain (no scheme, not IP), brute small list
-    if target.contains("://") { return vec![]; }
-    if target.parse::<std::net::IpAddr>().is_ok() { return vec![]; }
-    let wordlist = ["www", "test", "dev", "admin", "api"];
-    let mut out = vec![];
-    for w in wordlist.iter() {
-        let sub = format!("{}.{}", w, target);
-        if resolve_a(&sub).await { out.push(sub); }
-    }
-    out
+async fn subdomain_scan_rsubdomain(target: &str) -> anyhow::Result<Vec<String>> {
+    // skip non-domain inputs
+    if target.contains("://") { return Ok(vec![]); }
+    if target.parse::<std::net::IpAddr>().is_ok() { return Ok(vec![]); }
+
+    // Use rsubdomain with default dictionary and resolver; skip wildcard to reduce false positives
+    let domains = vec![target.to_string()];
+    let results = rsubdomain::brute_force_subdomains(
+        domains,
+        None,   // dictionary_file
+        None,   // resolvers
+        true,   // skip_wildcard
+        None,   // bandwidth_limit
+        false,  // verify_mode
+        false,  // resolve_records
+        true,   // silent
+        None,   // device
+    ).await.map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+    let mut subs: Vec<String> = results.into_iter().map(|r| r.domain).collect();
+    subs.sort();
+    subs.dedup();
+    Ok(subs)
 }
 
-async fn resolve_a(name: &str) -> bool {
-    use trust_dns_resolver::{TokioAsyncResolver, config::{ResolverConfig, ResolverOpts}};
-    let resolver = match TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default()) { Ok(r) => r, Err(_) => return false };
-    resolver.lookup_ip(name).await.is_ok()
-}
+//
 
 #[derive(Debug, Clone)]
 struct AssetRec { url: String, host: String, port: i32, service: String, typ: String }

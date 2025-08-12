@@ -20,3 +20,4 @@ url = "2.5"
 hostname = "0.4"
 trust-dns-resolver = { version = "0.22", default-features = false, features = ["tokio-runtime"] }
 publicsuffix = "2.2"
+rsubdomain = "1.2.5"
